@@ -427,7 +427,6 @@ static int swScale(SwsContext *c, const uint8_t *src[],
             dst[2] + dstStride[2] * chrDstY,
             (CONFIG_SWSCALE_ALPHA && alpPixBuf) ? dst[3] + dstStride[3] * dstY : NULL,
         };
-        const uint8_t *y_src;
 
         // First line needed as input
         const int firstLumSrcY  = FFMAX(1 - vLumFilterSize, vLumFilterPos[dstY]);
@@ -466,35 +465,29 @@ static int swScale(SwsContext *c, const uint8_t *src[],
                           lastLumSrcY, lastChrSrcY);
         }
 
-        //Disable luma horizontal scaling for OBE until swscale is fixed
-        y_src= src[0]+(lastInLumBuf + 1 - srcSliceY)*srcStride[0];
-
-        if(c->needs_hyscale || c->needs_vyscale){
-            while (lastInLumBuf < lastLumSrcY) {
-                const uint8_t *src1[4] = {
-                    src[0] + (lastInLumBuf + 1 - srcSliceY) * srcStride[0],
-                    src[1] + (lastInLumBuf + 1 - srcSliceY) * srcStride[1],
-                    src[2] + (lastInLumBuf + 1 - srcSliceY) * srcStride[2],
-                    src[3] + (lastInLumBuf + 1 - srcSliceY) * srcStride[3],
-                };
-                lumBufIndex++;
-                assert(lumBufIndex < 2 * vLumBufSize);
-                assert(lastInLumBuf + 1 - srcSliceY < srcSliceH);
-                assert(lastInLumBuf + 1 - srcSliceY >= 0);
-                hyscale(c, lumPixBuf[lumBufIndex], dstW, src1, srcW, lumXInc,
-                        hLumFilter, hLumFilterPos, hLumFilterSize,
-                        formatConvBuffer, pal, 0);
-                if (CONFIG_SWSCALE_ALPHA && alpPixBuf)
-                    hyscale(c, alpPixBuf[lumBufIndex], dstW, src1, srcW,
-                            lumXInc, hLumFilter, hLumFilterPos, hLumFilterSize,
-                            formatConvBuffer, pal, 1);
-                lastInLumBuf++;
-                DEBUG_BUFFERS("\t\tlumBufIndex %d: lastInLumBuf: %d\n",
-                              lumBufIndex, lastInLumBuf);
-            }
+        // Do horizontal scaling
+        while (lastInLumBuf < lastLumSrcY) {
+            const uint8_t *src1[4] = {
+                src[0] + (lastInLumBuf + 1 - srcSliceY) * srcStride[0],
+                src[1] + (lastInLumBuf + 1 - srcSliceY) * srcStride[1],
+                src[2] + (lastInLumBuf + 1 - srcSliceY) * srcStride[2],
+                src[3] + (lastInLumBuf + 1 - srcSliceY) * srcStride[3],
+            };
+            lumBufIndex++;
+            assert(lumBufIndex < 2 * vLumBufSize);
+            assert(lastInLumBuf + 1 - srcSliceY < srcSliceH);
+            assert(lastInLumBuf + 1 - srcSliceY >= 0);
+            hyscale(c, lumPixBuf[lumBufIndex], dstW, src1, srcW, lumXInc,
+                    hLumFilter, hLumFilterPos, hLumFilterSize,
+                    formatConvBuffer, pal, 0);
+            if (CONFIG_SWSCALE_ALPHA && alpPixBuf)
+                hyscale(c, alpPixBuf[lumBufIndex], dstW, src1, srcW,
+                        lumXInc, hLumFilter, hLumFilterPos, hLumFilterSize,
+                        formatConvBuffer, pal, 1);
+            lastInLumBuf++;
+            DEBUG_BUFFERS("\t\tlumBufIndex %d: lastInLumBuf: %d\n",
+                          lumBufIndex, lastInLumBuf);
         }
-        else
-            y_src = src[0]+(lastInLumBuf + 1 - srcSliceY)*srcStride[0];
         while (lastInChrBuf < lastChrSrcY) {
             const uint8_t *src1[4] = {
                 src[0] + (lastInChrBuf + 1 - chrSrcSliceY) * srcStride[0],
@@ -508,9 +501,7 @@ static int swScale(SwsContext *c, const uint8_t *src[],
             assert(lastInChrBuf + 1 - chrSrcSliceY >= 0);
             // FIXME replace parameters through context struct (some at least)
 
-//            OBE will always touch chroma
-//            if (c->needs_hcscale)
-              if (1)
+            if (c->needs_hcscale)
                 hcscale(c, chrUPixBuf[chrBufIndex], chrVPixBuf[chrBufIndex],
                         chrDstW, src1, chrSrcW, chrXInc,
                         hChrFilter, hChrFilterPos, hChrFilterSize,
@@ -596,12 +587,11 @@ static int swScale(SwsContext *c, const uint8_t *src[],
                 chrVSrcPtr = tmpV;
             }
 
-            if (isPlanarYUV(dstFormat) || (isGray(dstFormat) && !isALPHA(dstFormat))) { //YV12 like
-                const int chrSkipMask= (1<<c->chrDstVSubSample)-1;
+            if (isPlanarYUV(dstFormat) ||
+                (isGray(dstFormat) && !isALPHA(dstFormat))) { // YV12 like
+                const int chrSkipMask = (1 << c->chrDstVSubSample) - 1;
 
-                if(!c->needs_hyscale && !c->needs_vyscale){
-                    memcpy(dest[0], y_src, dstW*(c->dstBpc > 8 ? sizeof(uint16_t) : sizeof(uint8_t)));
-                } else if (vLumFilterSize == 1) {
+                if (vLumFilterSize == 1) {
                     yuv2plane1(lumSrcPtr[0], dest[0], dstW, c->lumDither8, 0);
                 } else {
                     yuv2planeX(vLumFilter + dstY * vLumFilterSize,
