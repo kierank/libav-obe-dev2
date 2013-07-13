@@ -48,8 +48,10 @@ SECTION .text
 ;-----------------------------------------------------------------------------
 
 ; SCALE_FUNC source_width, intermediate_nbits, filtersize, filtersuffix, n_args, n_xmm
-%macro SCALE_FUNC 6
-%ifnidn %3, X
+%macro SCALE_FUNC 6-7
+%ifidn %7, shifted
+cglobal hscale10to10_%4_%7, %5, 7, %6, pos0, dst, w, src, filter, fltpos, pos1
+%elifnidn %3, X
 cglobal hscale%1to%2_%4, %5, 7, %6, pos0, dst, w, src, filter, fltpos, pos1
 %else
 cglobal hscale%1to%2_%4, %5, 10, %6, pos0, dst, w, srcmem, filter, fltpos, fltsize
@@ -352,7 +354,11 @@ cglobal hscale%1to%2_%4, %5, 10, %6, pos0, dst, w, srcmem, filter, fltpos, fltsi
 %endif ; %1 == 16
 
     ; clip, store
+%ifidn %7, shifted
+    psrad         m0, 14 + %1 - %2 + 5
+%else
     psrad         m0, 14 + %1 - %2
+%endif
 %ifidn %3, X
     movifnidn   dstq, dstmp
 %endif ; %3 == X
@@ -408,6 +414,8 @@ SCALE_FUNCS  8, 15, %1
 SCALE_FUNCS  9, 15, %2
 SCALE_FUNCS 10, 15, %2
 SCALE_FUNCS 16, 15, %3
+SCALE_FUNC  10, 15, 4, 4,  6, %3, shifted
+SCALE_FUNC  10, 15, 8, 8,  6, %3, shifted
 %endif ; !sse4
 SCALE_FUNCS  8, 19, %1
 SCALE_FUNCS  9, 19, %2

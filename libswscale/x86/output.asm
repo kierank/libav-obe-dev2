@@ -27,6 +27,7 @@ SECTION_RODATA
 minshort:      times 8 dw 0x8000
 yuv2yuvX_16_start:  times 4 dd 0x4000 - 0x40000000
 yuv2yuvX_10_start:  times 4 dd 0x10000
+yuv2yuvX_10_start2: times 4 dd 0x800
 yuv2yuvX_9_start:   times 4 dd 0x20000
 yuv2yuvX_10_upper:  times 8 dw 0x3ff
 yuv2yuvX_9_upper:   times 8 dw 0x1ff
@@ -55,7 +56,7 @@ SECTION .text
 ; of 2. $offset is either 0 or 3. $dither holds 8 values.
 ;-----------------------------------------------------------------------------
 
-%macro yuv2planeX_fn 3
+%macro yuv2planeX_fn 3-4
 
 %if ARCH_X86_32
 %define cntr_reg fltsizeq
@@ -65,7 +66,12 @@ SECTION .text
 %define movsx movsxd
 %endif
 
+%ifidn %4, factored
+cglobal yuv2planeX_%1_factored, %3, 8, %2, filter, fltsize, src, dst, w, dither, offset
+%else
 cglobal yuv2planeX_%1, %3, 8, %2, filter, fltsize, src, dst, w, dither, offset
+%endif
+
 %if %1 == 8 || %1 == 9 || %1 == 10
     pxor            m6,  m6
 %endif ; %1 == 8/9/10
@@ -146,7 +152,11 @@ cglobal yuv2planeX_%1, %3, 8, %2, filter, fltsize, src, dst, w, dither, offset
     mova            m1,  m_dith
 %endif ; x86-32/64
 %else ; %1 == 9/10/16
+%ifidn %4, factored
+    mova            m1, [yuv2yuvX_%1_start2]
+%else
     mova            m1, [yuv2yuvX_%1_start]
+%endif ; %4, factored
     mova            m2,  m1
 %endif ; %1 == 8/9/10/16
     movsx     cntr_reg,  fltsizem
@@ -203,8 +213,13 @@ cglobal yuv2planeX_%1, %3, 8, %2, filter, fltsize, src, dst, w, dither, offset
     psrad           m2,  31 - %1
     psrad           m1,  31 - %1
 %else ; %1 == 10/9/8
+%ifidn %4, factored
+    psrad           m2,  27 - %1 - 5
+    psrad           m1,  27 - %1 - 5
+%else
     psrad           m2,  27 - %1
     psrad           m1,  27 - %1
+%endif ; %4, factored
 %endif ; %1 == 8/9/10/16
 
 %if %1 == 8
@@ -251,23 +266,27 @@ INIT_MMX mmxext
 yuv2planeX_fn  8,  0, 7
 yuv2planeX_fn  9,  0, 5
 yuv2planeX_fn 10,  0, 5
+yuv2planeX_fn 10,  0, 5, factored
 %endif
 
 INIT_XMM sse2
 yuv2planeX_fn  8, 10, 7
 yuv2planeX_fn  9,  7, 5
 yuv2planeX_fn 10,  7, 5
+yuv2planeX_fn 10,  7, 5, factored
 
 INIT_XMM sse4
 yuv2planeX_fn  8, 10, 7
 yuv2planeX_fn  9,  7, 5
 yuv2planeX_fn 10,  7, 5
 yuv2planeX_fn 16,  8, 5
+yuv2planeX_fn 10,  7, 5, factored
 
 INIT_XMM avx
 yuv2planeX_fn  8, 10, 7
 yuv2planeX_fn  9,  7, 5
 yuv2planeX_fn 10,  7, 5
+yuv2planeX_fn 10,  7, 5, factored
 
 ; %1=outout-bpc, %2=alignment (u/a)
 %macro yuv2plane1_mainloop 2

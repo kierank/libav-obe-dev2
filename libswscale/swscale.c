@@ -107,6 +107,7 @@ static void hScale16To19_c(SwsContext *c, int16_t *_dst, int dstW,
     }
 }
 
+/* x86 SIMD version has larger shift */
 static void hScale16To15_c(SwsContext *c, int16_t *dst, int dstW,
                            const uint8_t *_src, const int16_t *filter,
                            const int32_t *filterPos, int filterSize)
@@ -321,7 +322,11 @@ static av_always_inline void hcscale(SwsContext *c, int16_t *dst1,
         src2 = buf2;
     }
 
-    if (!c->hcscale_fast) {
+    if (!c->needs_hcscale) {
+        memcpy(dst1, src1, dstWidth * 2);
+        memcpy(dst2, src2, dstWidth * 2);
+    }
+    else if (!c->hcscale_fast) {
         c->hcScale(c, dst1, dstWidth, src1, hChrFilter, hChrFilterPos, hChrFilterSize);
         c->hcScale(c, dst2, dstWidth, src2, hChrFilter, hChrFilterPos, hChrFilterSize);
     } else { // fast bilinear upscale / crap downscale
@@ -491,7 +496,6 @@ static int swScale(SwsContext *c, const uint8_t *src[],
                           lastLumSrcY, lastChrSrcY);
         }
 
-        //Disable luma horizontal scaling for OBE until swscale is fixed
         y_src= src[0]+(lastInLumBuf + 1 - srcSliceY)*srcStride[0];
 
         if(c->needs_hyscale || c->needs_vyscale){
@@ -506,9 +510,15 @@ static int swScale(SwsContext *c, const uint8_t *src[],
                 assert(lumBufIndex < 2 * vLumBufSize);
                 assert(lastInLumBuf + 1 - srcSliceY < srcSliceH);
                 assert(lastInLumBuf + 1 - srcSliceY >= 0);
-                hyscale(c, lumPixBuf[lumBufIndex], dstW, src1, srcW, lumXInc,
-                        hLumFilter, hLumFilterPos, hLumFilterSize,
-                        formatConvBuffer, pal, 0);
+                if (c->needs_vyscale){
+                    hyscale(c, lumPixBuf[lumBufIndex], dstW, src1, srcW, lumXInc,
+                            hLumFilter, hLumFilterPos, hLumFilterSize,
+                            formatConvBuffer, pal, 0);
+                } else {
+                    hyscale(c, dest[0], dstW, src1, srcW, lumXInc,
+                            hLumFilter, hLumFilterPos, hLumFilterSize,
+                            formatConvBuffer, pal, 0);
+                }
                 if (CONFIG_SWSCALE_ALPHA && alpPixBuf)
                     hyscale(c, alpPixBuf[lumBufIndex], dstW, src1, srcW,
                             lumXInc, hLumFilter, hLumFilterPos, hLumFilterSize,
@@ -533,17 +543,23 @@ static int swScale(SwsContext *c, const uint8_t *src[],
             assert(lastInChrBuf + 1 - chrSrcSliceY >= 0);
             // FIXME replace parameters through context struct (some at least)
 
-//            OBE will always touch chroma
-//            if (c->needs_hcscale)
-              if (1)
+            // OBE will always touch chroma
+            if (c->needs_vcscale){
                 hcscale(c, chrUPixBuf[chrBufIndex], chrVPixBuf[chrBufIndex],
                         chrDstW, src1, chrSrcW, chrXInc,
                         hChrFilter, hChrFilterPos, hChrFilterSize,
                         formatConvBuffer, pal);
+            } else if (c->needs_hcscale) {
+                hcscale(c, dest[1], dest[2],
+                        chrDstW, src1, chrSrcW, chrXInc,
+                        hChrFilter, hChrFilterPos, hChrFilterSize,
+                        formatConvBuffer, pal);
+            }
             lastInChrBuf++;
             DEBUG_BUFFERS("\t\tchrBufIndex %d: lastInChrBuf: %d\n",
                           chrBufIndex, lastInChrBuf);
         }
+
         // wrap buf index around to stay inside the ring buffer
         if (lumBufIndex >= vLumBufSize)
             lumBufIndex -= vLumBufSize;
@@ -622,9 +638,13 @@ static int swScale(SwsContext *c, const uint8_t *src[],
             }
 
             if (isPlanarYUV(dstFormat) || (isGray(dstFormat) && !isALPHA(dstFormat))) { //YV12 like
+                // OBE is always planar
                 const int chrSkipMask= (1<<c->chrDstVSubSample)-1;
 
-                if(!c->needs_hyscale && !c->needs_vyscale){
+                if(c->needs_hyscale && !c->needs_vyscale){
+                    // everything has been done
+                }
+                else if(!c->needs_hyscale && !c->needs_vyscale){
                     memcpy(dest[0], y_src, dstW*(c->dstBpc > 8 ? sizeof(uint16_t) : sizeof(uint8_t)));
                 } else if (vLumFilterSize == 1) {
                     yuv2plane1(lumSrcPtr[0], dest[0], dstW, c->lumDither8, 0);
@@ -635,7 +655,9 @@ static int swScale(SwsContext *c, const uint8_t *src[],
                 }
 
                 if (!((dstY & chrSkipMask) || isGray(dstFormat))) {
-                    if (yuv2nv12cX) {
+                    if(c->needs_hcscale && !c->needs_vcscale){
+                        // everything has been done
+                    } else if (yuv2nv12cX) {
                         yuv2nv12cX(c, vChrFilter + chrDstY * vChrFilterSize,
                                    vChrFilterSize, chrUSrcPtr, chrVSrcPtr,
                                    dest[1], chrDstW);
@@ -773,15 +795,17 @@ static av_cold void sws_init_swScale_c(SwsContext *c)
         }
     }
 
+    /* not true in the OBE case */
+#if 0
     if (!(isGray(srcFormat) || isGray(c->dstFormat) ||
           srcFormat == AV_PIX_FMT_MONOBLACK || srcFormat == AV_PIX_FMT_MONOWHITE))
         c->needs_hcscale = 1;
+#endif
 }
 
 SwsFunc ff_getSwsFunc(SwsContext *c)
 {
     sws_init_swScale_c(c);
-
     if (HAVE_MMX)
         ff_sws_init_swScale_mmx(c);
     if (HAVE_ALTIVEC)

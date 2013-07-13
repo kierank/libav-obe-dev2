@@ -212,6 +212,26 @@ void ff_hscale ## from_bpc ## to ## to_bpc ## _ ## filter_n ## _ ## opt( \
                                                 const int16_t *filter, \
                                                 const int32_t *filterPos, int filterSize)
 
+void ff_hscale10to10_4_shifted_sse2( SwsContext *c, int16_t *data,
+                                     int dstW, const uint8_t *src,
+                                     const int16_t *filter,
+                                     const int32_t *filterPos, int filterSize);
+
+void ff_hscale10to10_4_shifted_ssse3( SwsContext *c, int16_t *data,
+                                      int dstW, const uint8_t *src,
+                                      const int16_t *filter,
+                                      const int32_t *filterPos, int filterSize);
+
+void ff_hscale10to10_8_shifted_sse2( SwsContext *c, int16_t *data,
+                                     int dstW, const uint8_t *src,
+                                     const int16_t *filter,
+                                     const int32_t *filterPos, int filterSize);
+
+void ff_hscale10to10_8_shifted_ssse3( SwsContext *c, int16_t *data,
+                                      int dstW, const uint8_t *src,
+                                      const int16_t *filter,
+                                      const int32_t *filterPos, int filterSize);
+
 #define SCALE_FUNCS(filter_n, opt) \
     SCALE_FUNC(filter_n,  8, 15, opt); \
     SCALE_FUNC(filter_n,  9, 15, opt); \
@@ -256,6 +276,18 @@ VSCALEX_FUNCS(sse2);
 VSCALEX_FUNCS(sse4);
 VSCALEX_FUNC(16, sse4);
 VSCALEX_FUNCS(avx);
+
+void ff_yuv2planeX_10_factored_sse2(const int16_t *filter, int filterSize,
+                                    const int16_t **src, uint8_t *dest, int dstW,
+                                    const uint8_t *dither, int offset);
+
+void ff_yuv2planeX_10_factored_sse4(const int16_t *filter, int filterSize,
+                                    const int16_t **src, uint8_t *dest, int dstW,
+                                    const uint8_t *dither, int offset);
+
+void ff_yuv2planeX_10_factored_avx(const int16_t *filter, int filterSize,
+                                   const int16_t **src, uint8_t *dest, int dstW,
+                                   const uint8_t *dither, int offset);
 
 #define VSCALE_FUNC(size, opt) \
 void ff_yuv2plane1_ ## size ## _ ## opt(const int16_t *src, uint8_t *dst, int dstW, \
@@ -411,6 +443,24 @@ switch(c->dstBpc){ \
                             HAVE_ALIGNED_STACK || ARCH_X86_64);
         ASSIGN_VSCALE_FUNC(c->yuv2plane1, sse2, sse2, 1);
 
+        if (!c->needs_hcscale) {
+            c->yuv2planeX = ff_yuv2planeX_10_factored_sse2;
+        }
+
+        if (!c->needs_vyscale) {
+            if( c->hLumFilterSize == 4 )
+                c->hyScale = ff_hscale10to10_4_shifted_sse2;
+            else
+                c->hyScale = ff_hscale10to10_8_shifted_sse2;
+        }
+
+        if (!c->needs_vcscale) {
+            if( c->hChrFilterSize == 4 )
+                c->hcScale = ff_hscale10to10_4_shifted_sse2;
+            else
+                c->hcScale = ff_hscale10to10_8_shifted_sse2;
+        }
+
         switch (c->srcFormat) {
         case AV_PIX_FMT_Y400A:
             c->lumToYV12 = ff_yuyvToY_sse2;
@@ -444,6 +494,21 @@ switch(c->dstBpc){ \
     if (EXTERNAL_SSSE3(cpu_flags)) {
         ASSIGN_SSE_SCALE_FUNC(c->hyScale, c->hLumFilterSize, ssse3, ssse3);
         ASSIGN_SSE_SCALE_FUNC(c->hcScale, c->hChrFilterSize, ssse3, ssse3);
+
+        if (!c->needs_vyscale) {
+            if( c->hLumFilterSize == 4 )
+                c->hyScale = ff_hscale10to10_4_shifted_ssse3;
+            else
+                c->hyScale = ff_hscale10to10_8_shifted_ssse3;
+        }
+
+        if (!c->needs_vcscale) {
+            if( c->hChrFilterSize == 4 )
+                c->hcScale = ff_hscale10to10_4_shifted_ssse3;
+            else
+                c->hcScale = ff_hscale10to10_8_shifted_ssse3;
+        }
+
         switch (c->srcFormat) {
         case_rgb(rgb24, RGB24, ssse3);
         case_rgb(bgr24, BGR24, ssse3);
@@ -458,6 +523,24 @@ switch(c->dstBpc){ \
         ASSIGN_VSCALEX_FUNC(c->yuv2planeX, sse4,
                             if (!isBE(c->dstFormat)) c->yuv2planeX = ff_yuv2planeX_16_sse4,
                             HAVE_ALIGNED_STACK || ARCH_X86_64);
+        if (!c->needs_hcscale) {
+            c->yuv2planeX = ff_yuv2planeX_10_factored_sse4;
+        }
+
+        if (!c->needs_vyscale) {
+            if( c->hLumFilterSize == 4 )
+                c->hyScale = ff_hscale10to10_4_shifted_ssse3;
+            else
+                c->hyScale = ff_hscale10to10_8_shifted_ssse3;
+        }
+
+        if (!c->needs_vcscale) {
+            if( c->hChrFilterSize == 4 )
+                c->hcScale = ff_hscale10to10_4_shifted_ssse3;
+            else
+                c->hcScale = ff_hscale10to10_8_shifted_ssse3;
+        }
+
         if (c->dstBpc == 16 && !isBE(c->dstFormat))
             c->yuv2plane1 = ff_yuv2plane1_16_sse4;
     }
@@ -466,7 +549,9 @@ switch(c->dstBpc){ \
         ASSIGN_VSCALEX_FUNC(c->yuv2planeX, avx, ,
                             HAVE_ALIGNED_STACK || ARCH_X86_64);
         ASSIGN_VSCALE_FUNC(c->yuv2plane1, avx, avx, 1);
-
+        if (!c->needs_hcscale) {
+            c->yuv2planeX = ff_yuv2planeX_10_factored_avx;
+        }
         switch (c->srcFormat) {
         case AV_PIX_FMT_YUYV422:
             c->chrToYV12 = ff_yuyvToUV_avx;

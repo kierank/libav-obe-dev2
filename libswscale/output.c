@@ -191,16 +191,17 @@ yuv2plane1_10_c_template(const int16_t *src, uint16_t *dest, int dstW,
     }
 }
 
+/* Note x86 SIMD versions have factorised version for unscaled chroma case */
 static av_always_inline void
 yuv2planeX_10_c_template(const int16_t *filter, int filterSize,
                          const int16_t **src, uint16_t *dest, int dstW,
                          int big_endian, int output_bits)
 {
     int i;
-    int shift = 11 + 16 - output_bits;
+    int shift = 11 + 16 - output_bits-5;
 
     for (i = 0; i < dstW; i++) {
-        int val = 1 << (26-output_bits);
+        int val = 1 << (26-output_bits-5);
         int j;
 
         for (j = 0; j < filterSize; j++)
