@@ -3139,14 +3139,30 @@ static int mov_write_header(AVFormatContext *s)
     AVDictionaryEntry *t;
     int i, hint_track = 0;
 
+    /* Default mode == MP4 */
+    mov->mode = MODE_MP4;
+
+    if (s->oformat != NULL) {
+        if (!strcmp("3gp", s->oformat->name)) mov->mode = MODE_3GP;
+        else if (!strcmp("3g2", s->oformat->name)) mov->mode = MODE_3GP|MODE_3G2;
+        else if (!strcmp("mov", s->oformat->name)) mov->mode = MODE_MOV;
+        else if (!strcmp("psp", s->oformat->name)) mov->mode = MODE_PSP;
+        else if (!strcmp("ipod",s->oformat->name)) mov->mode = MODE_IPOD;
+        else if (!strcmp("ismv",s->oformat->name)) mov->mode = MODE_ISM;
+    }
+
     /* Set the FRAGMENT flag if any of the fragmentation methods are
      * enabled. */
     if (mov->max_fragment_duration || mov->max_fragment_size ||
-        (s->oformat && !strcmp(s->oformat->name, "ismv")) ||
         mov->flags & (FF_MOV_FLAG_EMPTY_MOOV |
                       FF_MOV_FLAG_FRAG_KEYFRAME |
                       FF_MOV_FLAG_FRAG_CUSTOM))
         mov->flags |= FF_MOV_FLAG_FRAGMENT;
+
+    /* Set other implicit flags immediately */
+    if (mov->mode == MODE_ISM)
+        mov->flags |= FF_MOV_FLAG_EMPTY_MOOV | FF_MOV_FLAG_SEPARATE_MOOF |
+                      FF_MOV_FLAG_FRAGMENT;
 
     /* faststart: moov at the beginning of the file, if supported */
     if (mov->flags & FF_MOV_FLAG_FASTSTART) {
@@ -3163,28 +3179,17 @@ static int mov_write_header(AVFormatContext *s)
     if (!s->pb->seekable &&
         (!(mov->flags & FF_MOV_FLAG_FRAGMENT) || mov->ism_lookahead)) {
         av_log(s, AV_LOG_ERROR, "muxer does not support non seekable output\n");
-        return -1;
+        return AVERROR(EINVAL);
     }
 
-    /* Default mode == MP4 */
-    mov->mode = MODE_MP4;
 
-    if (s->oformat != NULL) {
-        if (!strcmp("3gp", s->oformat->name)) mov->mode = MODE_3GP;
-        else if (!strcmp("3g2", s->oformat->name)) mov->mode = MODE_3GP|MODE_3G2;
-        else if (!strcmp("mov", s->oformat->name)) mov->mode = MODE_MOV;
-        else if (!strcmp("psp", s->oformat->name)) mov->mode = MODE_PSP;
-        else if (!strcmp("ipod",s->oformat->name)) mov->mode = MODE_IPOD;
-        else if (!strcmp("ismv",s->oformat->name)) mov->mode = MODE_ISM;
-
-        mov_write_ftyp_tag(pb,s);
-        if (mov->mode == MODE_PSP) {
-            if (s->nb_streams != 2) {
-                av_log(s, AV_LOG_ERROR, "PSP mode need one video and one audio stream\n");
-                return -1;
-            }
-            mov_write_uuidprof_tag(pb, s);
+    mov_write_ftyp_tag(pb,s);
+    if (mov->mode == MODE_PSP) {
+        if (s->nb_streams != 2) {
+            av_log(s, AV_LOG_ERROR, "PSP mode need one video and one audio stream\n");
+            return AVERROR(EINVAL);
         }
+        mov_write_uuidprof_tag(pb, s);
     }
 
     mov->nb_streams = s->nb_streams;
@@ -3295,8 +3300,7 @@ static int mov_write_header(AVFormatContext *s)
         if (!(mov->flags & (FF_MOV_FLAG_FRAG_KEYFRAME |
                             FF_MOV_FLAG_FRAG_CUSTOM)) &&
             !mov->max_fragment_duration && !mov->max_fragment_size)
-            mov->max_fragment_duration = 5000000;
-        mov->flags |= FF_MOV_FLAG_EMPTY_MOOV | FF_MOV_FLAG_SEPARATE_MOOF;
+            mov->flags |= FF_MOV_FLAG_FRAG_KEYFRAME;
     }
 
     if (!(mov->flags & FF_MOV_FLAG_FRAGMENT)) {

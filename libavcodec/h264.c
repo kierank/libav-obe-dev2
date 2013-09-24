@@ -4547,8 +4547,9 @@ static int decode_nal_units(H264Context *h, const uint8_t *buf, int buf_size,
                 continue;
             }
 
-            // FIXME do not discard SEI id
-            if (avctx->skip_frame >= AVDISCARD_NONREF && h->nal_ref_idc == 0)
+            if (avctx->skip_frame >= AVDISCARD_NONREF &&
+                h->nal_ref_idc == 0 &&
+                h->nal_unit_type != NAL_SEI)
                 continue;
 
 again:
@@ -4559,8 +4560,11 @@ again:
                 (h->avctx->active_thread_type & FF_THREAD_FRAME) &&
                 (hx->nal_unit_type != NAL_PPS &&
                  hx->nal_unit_type != NAL_SPS)) {
-                av_log(avctx, AV_LOG_INFO, "Ignoring NAL unit %d during "
-                       "extradata parsing\n", hx->nal_unit_type);
+                if (hx->nal_unit_type < NAL_AUD ||
+                    hx->nal_unit_type > NAL_AUXILIARY_SLICE)
+                    av_log(avctx, AV_LOG_INFO,
+                           "Ignoring NAL unit %d during extradata parsing\n",
+                           hx->nal_unit_type);
                 hx->nal_unit_type = NAL_FF_IGNORE;
             }
             err = 0;
