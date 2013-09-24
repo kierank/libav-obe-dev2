@@ -45,6 +45,7 @@
 #include "libavutil/mathematics.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
+#include "libavutil/ppc/cpu.h"
 #include "libavutil/x86/asm.h"
 #include "libavutil/x86/cpu.h"
 #include "rgb2rgb.h"
@@ -193,8 +194,6 @@ int sws_isSupportedEndiannessConversion(enum AVPixelFormat pix_fmt)
     return (unsigned)pix_fmt < AV_PIX_FMT_NB ?
            format_entries[pix_fmt].is_supported_endianness : 0;
 }
-
-extern const int32_t ff_yuv2rgb_coeffs[8][4];
 
 const char *sws_format_name(enum AVPixelFormat format)
 {
@@ -495,7 +494,7 @@ static av_cold int initFilter(int16_t **outFilter, int32_t **filterPos,
             minFilterSize = min;
     }
 
-    if (HAVE_ALTIVEC && cpu_flags & AV_CPU_FLAG_ALTIVEC) {
+    if (PPC_ALTIVEC(cpu_flags)) {
         // we can handle the special case 4, so we don't want to go the full 8
         if (minFilterSize < 5)
             filterAlign = 4;
@@ -808,9 +807,9 @@ int sws_setColorspaceDetails(struct SwsContext *c, const int inv_table[4],
                              contrast, saturation);
     // FIXME factorize
 
-    if (HAVE_ALTIVEC && av_get_cpu_flags() & AV_CPU_FLAG_ALTIVEC)
-        ff_yuv2rgb_init_tables_altivec(c, inv_table, brightness,
-                                       contrast, saturation);
+    if (ARCH_PPC)
+        ff_yuv2rgb_init_tables_ppc(c, inv_table, brightness,
+                                   contrast, saturation);
     return 0;
 }
 
@@ -1012,7 +1011,7 @@ av_cold int sws_init_context(SwsContext *c, SwsFilter *srcFilter,
         (c->srcRange == c->dstRange || isAnyRGB(dstFormat))) {
         ff_get_unscaled_swscale(c);
 
-        if (c->swScale) {
+        if (c->swscale) {
             if (flags & SWS_PRINT_INFO)
                 av_log(c, AV_LOG_INFO,
                        "using unscaled %s -> %s special converter\n",
@@ -1122,10 +1121,8 @@ av_cold int sws_init_context(SwsContext *c, SwsFilter *srcFilter,
         } else
 #endif /* HAVE_MMXEXT_INLINE */
         {
-            const int filterAlign =
-                (HAVE_MMX && cpu_flags & AV_CPU_FLAG_MMX) ? 4 :
-                (HAVE_ALTIVEC && cpu_flags & AV_CPU_FLAG_ALTIVEC) ? 8 :
-                1;
+            const int filterAlign = X86_MMX(cpu_flags)     ? 4 :
+                                    PPC_ALTIVEC(cpu_flags) ? 8 : 1;
 
             if (initFilter(&c->hLumFilter, &c->hLumFilterPos,
                            &c->hLumFilterSize, c->lumXInc,
@@ -1146,10 +1143,8 @@ av_cold int sws_init_context(SwsContext *c, SwsFilter *srcFilter,
 
     /* precalculate vertical scaler filter coefficients */
     {
-        const int filterAlign =
-            (HAVE_MMX && cpu_flags & AV_CPU_FLAG_MMX) ? 2 :
-            (HAVE_ALTIVEC && cpu_flags & AV_CPU_FLAG_ALTIVEC) ? 8 :
-            1;
+        const int filterAlign = X86_MMX(cpu_flags)     ? 2 :
+                                PPC_ALTIVEC(cpu_flags) ? 8 : 1;
 
         if (initFilter(&c->vLumFilter, &c->vLumFilterPos, &c->vLumFilterSize,
                        c->lumYInc, srcH, dstH, filterAlign, (1 << 12),
@@ -1286,7 +1281,7 @@ av_cold int sws_init_context(SwsContext *c, SwsFilter *srcFilter,
             av_log(c, AV_LOG_INFO, "using 3DNOW\n");
         else if (INLINE_MMX(cpu_flags))
             av_log(c, AV_LOG_INFO, "using MMX\n");
-        else if (HAVE_ALTIVEC && cpu_flags & AV_CPU_FLAG_ALTIVEC)
+        else if (PPC_ALTIVEC(cpu_flags))
             av_log(c, AV_LOG_INFO, "using AltiVec\n");
         else
             av_log(c, AV_LOG_INFO, "using C\n");
@@ -1301,7 +1296,7 @@ av_cold int sws_init_context(SwsContext *c, SwsFilter *srcFilter,
                c->chrXInc, c->chrYInc);
     }
 
-    c->swScale = ff_getSwsFunc(c);
+    c->swscale = ff_getSwsFunc(c);
     return 0;
 fail: // FIXME replace things by appropriate error codes
     return -1;

@@ -67,7 +67,9 @@ enum Jpeg2000Quantsty { // quantization style
 #define JPEG2000_MAX_CBLKW 64
 #define JPEG2000_MAX_CBLKH 64
 
-#define JPEG2000_MAX_RESLEVELS 33
+
+#define JPEG2000_MAX_DECLEVELS 32
+#define JPEG2000_MAX_RESLEVELS (JPEG2000_MAX_DECLEVELS + 1)
 
 // T1 flags
 // flags determining significance of neighbor coefficients
@@ -134,8 +136,6 @@ typedef struct Jpeg2000CodingStyle {
             log2_cblk_height; // exponent of codeblock size
     uint8_t transform;        // DWT type
     uint8_t csty;             // coding style
-    uint8_t log2_prec_width,
-            log2_prec_height; // precinct size
     uint8_t nlayers;          // number of layers
     uint8_t mct;              // multiple component transformation
     uint8_t cblk_style;       // codeblock coding style
@@ -145,16 +145,11 @@ typedef struct Jpeg2000CodingStyle {
 } Jpeg2000CodingStyle;
 
 typedef struct Jpeg2000QuantStyle {
-    uint8_t expn[32 * 3];  // quantization exponent
-    uint32_t mant[32 * 3]; // quantization mantissa
+    uint8_t expn[JPEG2000_MAX_DECLEVELS * 3];  // quantization exponent
+    uint32_t mant[JPEG2000_MAX_DECLEVELS * 3]; // quantization mantissa
     uint8_t quantsty;      // quantization style
     uint8_t nguardbits;    // number of guard bits
 } Jpeg2000QuantStyle;
-
-typedef struct Jpeg2000Pass {
-    uint16_t rate;
-    int64_t disto;
-} Jpeg2000Pass;
 
 typedef struct Jpeg2000Cblk {
     uint8_t npasses;
@@ -165,12 +160,10 @@ typedef struct Jpeg2000Cblk {
     uint8_t lblock;
     uint8_t zero;
     uint8_t data[8192];
-    Jpeg2000Pass passes[100];
     uint16_t coord[2][2]; // border coordinates {{x0, x1}, {y0, y1}}
 } Jpeg2000Cblk; // code block
 
 typedef struct Jpeg2000Prec {
-    uint16_t xi0, yi0; // codeblock indexes ([xi0, xi1))
     uint16_t nb_codeblocks_width;
     uint16_t nb_codeblocks_height;
     Jpeg2000TgtNode *zerobits;
@@ -179,13 +172,11 @@ typedef struct Jpeg2000Prec {
     uint16_t coord[2][2]; // border coordinates {{x0, x1}, {y0, y1}}
 } Jpeg2000Prec; // precinct
 
-/* TODO: stepsize can be float or integer depending on
- * reversible or irreversible transformation. */
 typedef struct Jpeg2000Band {
     uint16_t coord[2][2]; // border coordinates {{x0, x1}, {y0, y1}}
     uint16_t log2_cblk_width, log2_cblk_height;
-    uint16_t cblknx, cblkny;
-    float stepsize; // quantization stepsize
+    int i_stepsize; // quantization stepsize
+    float f_stepsize; // quantization stepsize
     Jpeg2000Prec *prec;
 } Jpeg2000Band; // subband
 
@@ -197,13 +188,11 @@ typedef struct Jpeg2000ResLevel {
     Jpeg2000Band *band;
 } Jpeg2000ResLevel; // resolution level
 
-/* TODO: data can be float of integer depending of reversible/irreversible
- * transformation.
- */
 typedef struct Jpeg2000Component {
     Jpeg2000ResLevel *reslevel;
     DWTContext dwt;
-    float *data;
+    float *f_data;
+    int *i_data;
     uint16_t coord[2][2];   // border coordinates {{x0, x1}, {y0, y1}} -- can be reduced with lowres option
     uint16_t coord_o[2][2]; // border coordinates {{x0, x1}, {y0, y1}} -- original values from jpeg2000 headers
 } Jpeg2000Component;

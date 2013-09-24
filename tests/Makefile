@@ -1,7 +1,7 @@
 VREF = tests/vsynth1/00.pgm
 AREF = tests/data/asynth1.sw
 
-OBJDIRS += tests/data tests/vsynth1
+OBJDIRS += tests/data tests/vsynth1 tests/data/filtergraphs
 
 $(VREF): tests/videogen$(HOSTEXESUF) | tests/vsynth1
 	$(M)./$< 'tests/vsynth1/'
@@ -20,7 +20,14 @@ tests/data/vsynth2.yuv: tests/rotozoom$(HOSTEXESUF) | tests/data
 
 tests/data/asynth% tests/data/vsynth%.yuv tests/vsynth%/00.pgm: TAG = GEN
 
+tests/data/filtergraphs/%: TAG = COPY
+tests/data/filtergraphs/%: $(SRC_PATH)/tests/filtergraphs/% | tests/data/filtergraphs
+	$(M)cp $< $@
+
+# Check sanity of dependencies when running FATE tests.
+ifneq (,$(filter check fate%,$(filter-out fate-rsync,$(MAKECMDGOALS))))
 CHKCFG  = $(if $($(1))$(!$(1)),$($(1)), $(error No such config: $(1)))
+endif
 
 ALLYES  = $(strip $(call XYES, $(1)))
 XYES    = $(if $(strip $(1)),                                           \
@@ -37,6 +44,8 @@ ENCDEC2 = $(call ALLYES, $(firstword $(1))_ENCODER $(lastword $(1))_DECODER  \
 
 DEMDEC  = $(call ALLYES, $(1)_DEMUXER $(2:%=%_DECODER))
 ENCMUX  = $(call ALLYES, $(1:%=%_ENCODER) $(2)_MUXER)
+
+DEMMUX  = $(call ALLYES, $(1)_DEMUXER $(2)_MUXER)
 
 FILTERDEMDEC       = $(call ALLYES, $(1)_FILTER $(2)_DEMUXER $(3)_DECODER)
 FILTERDEMDECMUX    = $(call ALLYES, $(1)_FILTER $(2)_DEMUXER $(3)_DECODER $(4)_MUXER)
@@ -71,11 +80,13 @@ include $(SRC_PATH)/tests/fate/h264.mak
 include $(SRC_PATH)/tests/fate/image.mak
 include $(SRC_PATH)/tests/fate/indeo.mak
 include $(SRC_PATH)/tests/fate/libavcodec.mak
+include $(SRC_PATH)/tests/fate/libavdevice.mak
 include $(SRC_PATH)/tests/fate/libavformat.mak
 include $(SRC_PATH)/tests/fate/libavutil.mak
 include $(SRC_PATH)/tests/fate/lossless-audio.mak
 include $(SRC_PATH)/tests/fate/lossless-video.mak
 include $(SRC_PATH)/tests/fate/microsoft.mak
+include $(SRC_PATH)/tests/fate/monkeysaudio.mak
 include $(SRC_PATH)/tests/fate/mp3.mak
 include $(SRC_PATH)/tests/fate/mpc.mak
 include $(SRC_PATH)/tests/fate/pcm.mak

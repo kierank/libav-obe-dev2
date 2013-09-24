@@ -173,7 +173,7 @@ static unsigned int
 fixup_vorbis_headers(AVFormatContext * as, struct oggvorbis_private *priv,
                      uint8_t **buf)
 {
-    int i,offset, len;
+    int i, offset, len, err;
     unsigned char *ptr;
 
     len = priv->len[0] + priv->len[1] + priv->len[2];
@@ -188,7 +188,8 @@ fixup_vorbis_headers(AVFormatContext * as, struct oggvorbis_private *priv,
         offset += priv->len[i];
         av_freep(&priv->packet[i]);
     }
-    *buf = av_realloc(*buf, offset + FF_INPUT_BUFFER_PADDING_SIZE);
+    if ((err = av_reallocp(buf, offset + FF_INPUT_BUFFER_PADDING_SIZE)) < 0)
+        return err;
     return offset;
 }
 
@@ -212,14 +213,14 @@ vorbis_header (AVFormatContext * s, int idx)
     struct oggvorbis_private *priv;
     int pkt_type = os->buf[os->pstart];
 
-    if (!(pkt_type & 1))
-        return 0;
-
     if (!os->private) {
         os->private = av_mallocz(sizeof(struct oggvorbis_private));
         if (!os->private)
             return 0;
     }
+
+    if (!(pkt_type & 1))
+        return 0;
 
     if (os->psize < 1 || pkt_type > 5)
         return -1;

@@ -115,7 +115,6 @@ static int getsigctxno(int flag, int bandno)
             return 2;
         if (d == 1)
             return 1;
-        return 0;
     } else {
         if (d >= 3)
             return 8;
@@ -135,7 +134,6 @@ static int getsigctxno(int flag, int bandno)
             return 2;
         if (h + v == 1)
             return 1;
-        return 0;
     }
     return 0;
 }
@@ -204,7 +202,12 @@ int ff_jpeg2000_init_component(Jpeg2000Component *comp,
 {
     uint8_t log2_band_prec_width, log2_band_prec_height;
     int reslevelno, bandno, gbandno = 0, ret, i, j;
-    uint32_t csize = 1;
+    uint32_t csize;
+
+    if (!codsty->nreslevels2decode) {
+        av_log(avctx, AV_LOG_ERROR, "nreslevels2decode uninitialized\n");
+        return AVERROR_INVALIDDATA;
+    }
 
     if (ret = ff_jpeg2000_dwt_init(&comp->dwt, comp->coord,
                                    codsty->nreslevels2decode - 1,
@@ -214,9 +217,17 @@ int ff_jpeg2000_init_component(Jpeg2000Component *comp,
     csize = (comp->coord[0][1] - comp->coord[0][0]) *
             (comp->coord[1][1] - comp->coord[1][0]);
 
-    comp->data = av_malloc_array(csize, sizeof(*comp->data));
-    if (!comp->data)
-        return AVERROR(ENOMEM);
+    if (codsty->transform == FF_DWT97) {
+        comp->i_data = NULL;
+        comp->f_data = av_malloc_array(csize, sizeof(*comp->f_data));
+        if (!comp->f_data)
+            return AVERROR(ENOMEM);
+    } else {
+        comp->f_data = NULL;
+        comp->i_data = av_malloc_array(csize, sizeof(*comp->i_data));
+        if (!comp->i_data)
+            return AVERROR(ENOMEM);
+    }
     comp->reslevel = av_malloc_array(codsty->nreslevels, sizeof(*comp->reslevel));
     if (!comp->reslevel)
         return AVERROR(ENOMEM);
@@ -281,14 +292,14 @@ int ff_jpeg2000_init_component(Jpeg2000Component *comp,
                 int numbps;
             case JPEG2000_QSTY_NONE:
                 /* TODO: to verify. No quantization in this case */
-                numbps = cbps +
-                         lut_gain[codsty->transform][bandno + reslevelno > 0];
-                band->stepsize = (float)SHL(2048 + qntsty->mant[gbandno],
-                                            2 + numbps - qntsty->expn[gbandno]);
+                band->f_stepsize = 1;
                 break;
             case JPEG2000_QSTY_SI:
                 /*TODO: Compute formula to implement. */
-                band->stepsize = (float) (1 << 13);
+                numbps = cbps +
+                         lut_gain[codsty->transform == FF_DWT53][bandno + (reslevelno > 0)];
+                band->f_stepsize = SHL(2048 + qntsty->mant[gbandno],
+                                       2 + numbps - qntsty->expn[gbandno]);
                 break;
             case JPEG2000_QSTY_SE:
                 /* Exponent quantization step.
@@ -300,20 +311,20 @@ int ff_jpeg2000_init_component(Jpeg2000Component *comp,
                  * but it works (compared to OpenJPEG). Why?
                  * Further investigation needed. */
                 gain            = cbps;
-                band->stepsize  = pow(2.0, gain - qntsty->expn[gbandno]);
-                band->stepsize *= (float)qntsty->mant[gbandno] / 2048.0 + 1.0;
-                /* FIXME: In openjepg code stespize = stepsize * 0.5. Why?
-                 * If not set output of entropic decoder is not correct. */
-                band->stepsize *= 0.5;
+                band->f_stepsize  = pow(2.0, gain - qntsty->expn[gbandno]);
+                band->f_stepsize *= qntsty->mant[gbandno] / 2048.0 + 1.0;
                 break;
             default:
-                band->stepsize = 0;
+                band->f_stepsize = 0;
                 av_log(avctx, AV_LOG_ERROR, "Unknown quantization format\n");
                 break;
             }
-            /* BITEXACT computing case --> convert to int */
-            if (avctx->flags & CODEC_FLAG_BITEXACT)
-                band->stepsize = (int32_t)(band->stepsize * (1 << 16));
+            /* FIXME: In openjepg code stespize = stepsize * 0.5. Why?
+             * If not set output of entropic decoder is not correct. */
+            if (!av_codec_is_encoder(avctx->codec))
+                band->f_stepsize *= 0.5;
+
+            band->i_stepsize = band->f_stepsize * (1 << 16);
 
             /* computation of tbx_0, tbx_1, tby_0, tby_1
              * see ISO/IEC 15444-1:2002 B.5 eq. B-15 and tbl B.1
@@ -324,9 +335,8 @@ int ff_jpeg2000_init_component(Jpeg2000Component *comp,
                 for (i = 0; i < 2; i++)
                     for (j = 0; j < 2; j++)
                         band->coord[i][j] =
-                            ff_jpeg2000_ceildivpow2(comp->coord_o[i][j],
+                            ff_jpeg2000_ceildivpow2(comp->coord_o[i][j] - comp->coord_o[i][0],
                                                     declvl - 1);
-
                 log2_band_prec_width  = reslevel->log2_prec_width;
                 log2_band_prec_height = reslevel->log2_prec_height;
                 /* see ISO/IEC 15444-1:2002 eq. B-17 and eq. B-15 */
@@ -341,7 +351,7 @@ int ff_jpeg2000_init_component(Jpeg2000Component *comp,
                     for (j = 0; j < 2; j++)
                         /* Formula example for tbx_0 = ceildiv((tcx_0 - 2 ^ (declvl - 1) * x0_b) / declvl) */
                         band->coord[i][j] =
-                            ff_jpeg2000_ceildivpow2(comp->coord_o[i][j] -
+                            ff_jpeg2000_ceildivpow2(comp->coord_o[i][j] - comp->coord_o[i][0] -
                                                     (((bandno + 1 >> i) & 1) << declvl - 1),
                                                     declvl);
                 /* TODO: Manage case of 3 band offsets here or
@@ -356,6 +366,11 @@ int ff_jpeg2000_init_component(Jpeg2000Component *comp,
                 log2_band_prec_width  = reslevel->log2_prec_width  - 1;
                 log2_band_prec_height = reslevel->log2_prec_height - 1;
             }
+
+            for (j = 0; j < 2; j++)
+                band->coord[0][j] = ff_jpeg2000_ceildiv(band->coord[0][j], dx);
+            for (j = 0; j < 2; j++)
+                band->coord[1][j] = ff_jpeg2000_ceildiv(band->coord[1][j], dy);
 
             band->prec = av_malloc_array(reslevel->num_precincts_x *
                                          reslevel->num_precincts_y,
@@ -413,9 +428,9 @@ int ff_jpeg2000_init_component(Jpeg2000Component *comp,
                 if (!prec->zerobits)
                     return AVERROR(ENOMEM);
 
-                prec->cblk = av_malloc_array(prec->nb_codeblocks_width *
-                                             prec->nb_codeblocks_height,
-                                             sizeof(*prec->cblk));
+                prec->cblk = av_mallocz_array(prec->nb_codeblocks_width *
+                                              prec->nb_codeblocks_height,
+                                              sizeof(*prec->cblk));
                 if (!prec->cblk)
                     return AVERROR(ENOMEM);
                 for (cblkno = 0; cblkno < prec->nb_codeblocks_width * prec->nb_codeblocks_height; cblkno++) {
@@ -440,6 +455,20 @@ int ff_jpeg2000_init_component(Jpeg2000Component *comp,
                     /* Compute Cy1 */
                     cblk->coord[1][1] = FFMIN(Cy0 + (1 << band->log2_cblk_height),
                                               prec->coord[1][1]);
+                    /* Update code-blocks coordinates according sub-band position */
+                    if ((bandno + !!reslevelno) & 1) {
+                        cblk->coord[0][0] += comp->reslevel[reslevelno-1].coord[0][1] -
+                                             comp->reslevel[reslevelno-1].coord[0][0];
+                        cblk->coord[0][1] += comp->reslevel[reslevelno-1].coord[0][1] -
+                                             comp->reslevel[reslevelno-1].coord[0][0];
+                    }
+                    if ((bandno + !!reslevelno) & 2) {
+                        cblk->coord[1][0] += comp->reslevel[reslevelno-1].coord[1][1] -
+                                             comp->reslevel[reslevelno-1].coord[1][0];
+                        cblk->coord[1][1] += comp->reslevel[reslevelno-1].coord[1][1] -
+                                             comp->reslevel[reslevelno-1].coord[1][0];
+                    }
+
                     cblk->zero      = 0;
                     cblk->lblock    = 3;
                     cblk->length    = 0;
@@ -455,7 +484,9 @@ int ff_jpeg2000_init_component(Jpeg2000Component *comp,
 void ff_jpeg2000_cleanup(Jpeg2000Component *comp, Jpeg2000CodingStyle *codsty)
 {
     int reslevelno, bandno, precno;
-    for (reslevelno = 0; reslevelno < codsty->nreslevels; reslevelno++) {
+    for (reslevelno = 0;
+         comp->reslevel && reslevelno < codsty->nreslevels;
+         reslevelno++) {
         Jpeg2000ResLevel *reslevel = comp->reslevel + reslevelno;
 
         for (bandno = 0; bandno < reslevel->nbands; bandno++) {
@@ -474,5 +505,6 @@ void ff_jpeg2000_cleanup(Jpeg2000Component *comp, Jpeg2000CodingStyle *codsty)
 
     ff_dwt_destroy(&comp->dwt);
     av_freep(&comp->reslevel);
-    av_freep(&comp->data);
+    av_freep(&comp->i_data);
+    av_freep(&comp->f_data);
 }

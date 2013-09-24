@@ -1,6 +1,4 @@
 /*
- * Copyright (c) 2010 Mans Rullgard <mans@mansr.com>
- *
  * This file is part of Libav.
  *
  * Libav is free software; you can redistribute it and/or
@@ -18,22 +16,18 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include <stdint.h>
+#ifndef AVUTIL_CPU_INTERNAL_H
+#define AVUTIL_CPU_INTERNAL_H
 
-#include "libavutil/attributes.h"
-#include "libavutil/arm/cpu.h"
-#include "libavcodec/avcodec.h"
-#include "libavcodec/vp56dsp.h"
+#include "cpu.h"
 
-void ff_vp6_edge_filter_hor_neon(uint8_t *yuv, int stride, int t);
-void ff_vp6_edge_filter_ver_neon(uint8_t *yuv, int stride, int t);
+#define CPUEXT_SUFFIX(flags, suffix, cpuext)                            \
+    (HAVE_ ## cpuext ## suffix && ((flags) & AV_CPU_FLAG_ ## cpuext))
 
-av_cold void ff_vp56dsp_init_arm(VP56DSPContext *s, enum AVCodecID codec)
-{
-    int cpu_flags = av_get_cpu_flags();
+#define CPUEXT(flags, cpuext) CPUEXT_SUFFIX(flags, , cpuext)
 
-    if (codec != AV_CODEC_ID_VP5 && have_neon(cpu_flags)) {
-        s->edge_filter_hor = ff_vp6_edge_filter_hor_neon;
-        s->edge_filter_ver = ff_vp6_edge_filter_ver_neon;
-    }
-}
+int ff_get_cpu_flags_arm(void);
+int ff_get_cpu_flags_ppc(void);
+int ff_get_cpu_flags_x86(void);
+
+#endif /* AVUTIL_CPU_INTERNAL_H */

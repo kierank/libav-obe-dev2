@@ -48,7 +48,7 @@
  *
  */
 
-#define WTV_SECTOR_BITS    12
+#define WTV_SECTOR_BITS    INT64_C(12)
 #define WTV_SECTOR_SIZE    (1 << WTV_SECTOR_BITS)
 #define WTV_BIGSECTOR_BITS 18
 
@@ -94,7 +94,7 @@ static int wtvfile_read_packet(void *opaque, uint8_t *buf, int buf_size)
             int i = wf->position >> wf->sector_bits;
             if (i >= wf->nb_sectors ||
                 (wf->sectors[i] != wf->sectors[i - 1] + (1 << (wf->sector_bits - WTV_SECTOR_BITS)) &&
-                avio_seek(pb, (int64_t)wf->sectors[i] << WTV_SECTOR_BITS, SEEK_SET) < 0)) {
+                avio_seek(pb, wf->sectors[i] << WTV_SECTOR_BITS, SEEK_SET) < 0)) {
                 wf->error = 1;
                 break;
             }
@@ -119,7 +119,7 @@ static int64_t wtvfile_seek(void *opaque, int64_t offset, int whence)
         offset = wf->length;
 
     wf->error = offset < 0 || offset >= wf->length ||
-                avio_seek(pb, ((int64_t)wf->sectors[offset >> wf->sector_bits] << WTV_SECTOR_BITS)
+                avio_seek(pb, (wf->sectors[offset >> wf->sector_bits] << WTV_SECTOR_BITS)
                               + (offset & ((1 << wf->sector_bits) - 1)), SEEK_SET) < 0;
     wf->position = offset;
     return offset;
@@ -191,7 +191,7 @@ static AVIOContext * wtvfile_open_sector(int first_sector, uint64_t length, int 
         }
         wf->nb_sectors = 0;
         for (i = 0; i < nb_sectors1; i++) {
-            if (avio_seek(s->pb, (int64_t)sectors1[i] << WTV_SECTOR_BITS, SEEK_SET) < 0)
+            if (avio_seek(s->pb, sectors1[i] << WTV_SECTOR_BITS, SEEK_SET) < 0)
                 break;
             wf->nb_sectors += read_ints(s->pb, wf->sectors + i * WTV_SECTOR_SIZE / 4, WTV_SECTOR_SIZE / 4);
         }
@@ -218,7 +218,7 @@ static AVIOContext * wtvfile_open_sector(int first_sector, uint64_t length, int 
 
     /* seek to initial sector */
     wf->position = 0;
-    if (avio_seek(s->pb, (int64_t)wf->sectors[0] << WTV_SECTOR_BITS, SEEK_SET) < 0) {
+    if (avio_seek(s->pb, wf->sectors[0] << WTV_SECTOR_BITS, SEEK_SET) < 0) {
         av_free(wf->sectors);
         av_free(wf);
         return NULL;
@@ -269,7 +269,12 @@ static AVIOContext * wtvfile_open2(AVFormatContext *s, const uint8_t *buf, int b
         dir_length  = AV_RL16(buf + 16);
         file_length = AV_RL64(buf + 24);
         name_size   = 2 * AV_RL32(buf + 32);
-        if (buf + 48 + name_size > buf_end) {
+        if (name_size < 0) {
+            av_log(s, AV_LOG_ERROR,
+                   "bad filename length, remaining directory entries ignored\n");
+            break;
+        }
+        if (48 + name_size > buf_end - buf) {
             av_log(s, AV_LOG_ERROR, "filename exceeds buffer size; remaining directory entries ignored\n");
             break;
         }
@@ -472,6 +477,7 @@ static void get_attachment(AVFormatContext *s, AVIOContext *pb, int length)
     st->codec->codec_id   = AV_CODEC_ID_MJPEG;
     st->codec->codec_type = AVMEDIA_TYPE_ATTACHMENT;
     st->codec->extradata  = av_mallocz(filesize);
+    st->id = -1;
     if (!st->codec->extradata)
         goto done;
     st->codec->extradata_size = filesize;

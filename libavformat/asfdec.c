@@ -25,6 +25,7 @@
 #include "libavutil/bswap.h"
 #include "libavutil/common.h"
 #include "libavutil/dict.h"
+#include "libavutil/internal.h"
 #include "libavutil/mathematics.h"
 #include "libavutil/opt.h"
 #include "avformat.h"
@@ -671,6 +672,7 @@ static int asf_read_metadata(AVFormatContext *s, int64_t size)
 static int asf_read_marker(AVFormatContext *s, int64_t size)
 {
     AVIOContext *pb = s->pb;
+    ASFContext *asf = s->priv_data;
     int i, count, name_len, ret;
     char name[1024];
 
@@ -688,6 +690,7 @@ static int asf_read_marker(AVFormatContext *s, int64_t size)
 
         avio_rl64(pb);             // offset, 8 bytes
         pres_time = avio_rl64(pb); // presentation time
+        pres_time -= asf->hdr.preroll * 10000;
         avio_rl16(pb);             // entry length
         avio_rl32(pb);             // send time
         avio_rl32(pb);             // flags
@@ -1252,7 +1255,9 @@ static int asf_parse_packet(AVFormatContext *s, AVIOContext *pb, AVPacket *pkt)
             asf_st->frag_offset         = 0;
             *pkt                        = asf_st->pkt;
 #if FF_API_DESTRUCT_PACKET
+FF_DISABLE_DEPRECATION_WARNINGS
             asf_st->pkt.destruct        = NULL;
+FF_ENABLE_DEPRECATION_WARNINGS
 #endif
             asf_st->pkt.buf             = 0;
             asf_st->pkt.size            = 0;

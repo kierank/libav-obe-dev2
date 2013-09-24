@@ -165,17 +165,16 @@ av_cold int ff_dct_common_init(MpegEncContext *s)
         s->dct_unquantize_mpeg2_intra = dct_unquantize_mpeg2_intra_bitexact;
     s->dct_unquantize_mpeg2_inter = dct_unquantize_mpeg2_inter_c;
 
-#if ARCH_X86
-    ff_MPV_common_init_x86(s);
-#elif ARCH_ALPHA
-    ff_MPV_common_init_axp(s);
-#elif ARCH_ARM
-    ff_MPV_common_init_arm(s);
-#elif ARCH_BFIN
-    ff_MPV_common_init_bfin(s);
-#elif ARCH_PPC
-    ff_MPV_common_init_ppc(s);
-#endif
+    if (ARCH_ALPHA)
+        ff_MPV_common_init_axp(s);
+    if (ARCH_ARM)
+        ff_MPV_common_init_arm(s);
+    if (ARCH_BFIN)
+        ff_MPV_common_init_bfin(s);
+    if (ARCH_PPC)
+        ff_MPV_common_init_ppc(s);
+    if (ARCH_X86)
+        ff_MPV_common_init_x86(s);
 
     /* load & permutate scantables
      * note: only wmv uses different ones
@@ -434,6 +433,9 @@ void ff_mpeg_unref_picture(MpegEncContext *s, Picture *pic)
         av_frame_unref(&pic->f);
 
     av_buffer_unref(&pic->hwaccel_priv_buf);
+
+    if (pic->needs_realloc)
+        free_picture_tables(pic);
 
     memset((uint8_t*)pic + off, 0, sizeof(*pic) - off);
 }
@@ -1685,7 +1687,6 @@ void ff_MPV_frame_end(MpegEncContext *s)
         ff_xvmc_field_end(s);
    } else if ((s->er.error_count || s->encoding) &&
               !s->avctx->hwaccel &&
-              !(s->avctx->codec->capabilities & CODEC_CAP_HWACCEL_VDPAU) &&
               s->unrestricted_mv &&
               s->current_picture.reference &&
               !s->intra_only &&
@@ -2209,7 +2210,6 @@ void ff_draw_horiz_band(AVCodecContext *avctx, DSPContext *dsp, Picture *cur,
     }
 
     if (!avctx->hwaccel &&
-        !(avctx->codec->capabilities & CODEC_CAP_HWACCEL_VDPAU) &&
         draw_edges &&
         cur->reference &&
         !(avctx->flags & CODEC_FLAG_EMU_EDGE)) {
