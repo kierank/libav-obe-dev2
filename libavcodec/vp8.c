@@ -1179,7 +1179,7 @@ static av_always_inline
 void vp8_mc_luma(VP8Context *s, VP8ThreadData *td, uint8_t *dst,
                  ThreadFrame *ref, const VP56mv *mv,
                  int x_off, int y_off, int block_w, int block_h,
-                 int width, int height, int linesize,
+                 int width, int height, ptrdiff_t linesize,
                  vp8_mc_func mc_func[3][3])
 {
     uint8_t *src = ref->f->data[0];
@@ -1229,7 +1229,7 @@ void vp8_mc_luma(VP8Context *s, VP8ThreadData *td, uint8_t *dst,
 static av_always_inline
 void vp8_mc_chroma(VP8Context *s, VP8ThreadData *td, uint8_t *dst1, uint8_t *dst2,
                    ThreadFrame *ref, const VP56mv *mv, int x_off, int y_off,
-                   int block_w, int block_h, int width, int height, int linesize,
+                   int block_w, int block_h, int width, int height, ptrdiff_t linesize,
                    vp8_mc_func mc_func[3][3])
 {
     uint8_t *src1 = ref->f->data[1], *src2 = ref->f->data[2];
@@ -2107,6 +2107,7 @@ static int vp8_decode_update_thread_context(AVCodecContext *dst, const AVCodecCo
 
 AVCodec ff_vp8_decoder = {
     .name                  = "vp8",
+    .long_name             = NULL_IF_CONFIG_SMALL("On2 VP8"),
     .type                  = AVMEDIA_TYPE_VIDEO,
     .id                    = AV_CODEC_ID_VP8,
     .priv_data_size        = sizeof(VP8Context),
@@ -2115,7 +2116,6 @@ AVCodec ff_vp8_decoder = {
     .decode                = ff_vp8_decode_frame,
     .capabilities          = CODEC_CAP_DR1 | CODEC_CAP_FRAME_THREADS | CODEC_CAP_SLICE_THREADS,
     .flush                 = vp8_decode_flush,
-    .long_name             = NULL_IF_CONFIG_SMALL("On2 VP8"),
     .init_thread_copy      = ONLY_IF_THREADS_ENABLED(vp8_decode_init_thread_copy),
     .update_thread_context = ONLY_IF_THREADS_ENABLED(vp8_decode_update_thread_context),
 };

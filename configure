@@ -269,6 +269,7 @@ Optimization options (experts only):
   --disable-sse42          disable SSE4.2 optimizations
   --disable-avx            disable AVX optimizations
   --disable-fma4           disable FMA4 optimizations
+  --disable-avx2           disable AVX2 optimizations
   --disable-armv5te        disable armv5te optimizations
   --disable-armv6          disable armv6 optimizations
   --disable-armv6t2        disable armv6t2 optimizations
@@ -1178,6 +1179,7 @@ ARCH_EXT_LIST_X86='
     amd3dnow
     amd3dnowext
     avx
+    avx2
     fma4
     i686
     mmx
@@ -1498,6 +1500,7 @@ sse4_deps="ssse3"
 sse42_deps="sse4"
 avx_deps="sse42"
 fma4_deps="avx"
+avx2_deps="avx"
 
 mmx_external_deps="yasm"
 mmx_inline_deps="inline_asm"
@@ -1814,6 +1817,7 @@ caf_demuxer_select="riffdec"
 dirac_demuxer_select="dirac_parser"
 dxa_demuxer_select="riffdec"
 eac3_demuxer_select="ac3_parser"
+f4v_muxer_select="mov_muxer"
 flac_demuxer_select="flac_parser"
 hls_muxer_select="mpegts_muxer"
 ipod_muxer_select="mov_muxer"
@@ -1974,6 +1978,7 @@ nm_default="nm -g"
 objformat="elf"
 pkg_config_default=pkg-config
 ranlib="ranlib"
+strip="strip"
 yasmexe="yasm"
 
 nogas=":"
@@ -2232,6 +2237,7 @@ cc_default="${cross_prefix}${cc_default}"
 nm_default="${cross_prefix}${nm_default}"
 pkg_config_default="${cross_prefix}${pkg_config_default}"
 ranlib="${cross_prefix}${ranlib}"
+strip="${cross_prefix}${strip}"
 
 sysinclude_default="${sysroot}/usr/include"
 
@@ -3589,8 +3595,8 @@ EOF
             elf*) enabled debug && append YASMFLAGS $yasm_debug ;;
         esac
 
-        check_yasm "vextractf128 xmm0, ymm0, 0" && enable yasm ||
-            die "yasm not found, use --disable-yasm for a crippled build"
+        check_yasm "movbe ecx, [5]" && enable yasm ||
+            die "yasm/nasm not found or too old. Use --disable-yasm for a crippled build."
         check_yasm "vfmaddps ymm0, ymm1, ymm2, ymm3" || disable fma4_external
         check_yasm "CPU amdnop" && enable cpunop
     fi
@@ -4166,6 +4172,7 @@ AR=$ar
 ARFLAGS=$arflags
 AR_O=$ar_o
 RANLIB=$ranlib
+STRIP=$strip
 LN_S=$ln_s
 CPPFLAGS=$CPPFLAGS
 CFLAGS=$CFLAGS

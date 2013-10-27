@@ -875,7 +875,7 @@ static av_always_inline void mc_dir_part(H264Context *h, Picture *pic,
     const int mx      = h->mv_cache[list][scan8[n]][0] + src_x_offset * 8;
     int my            = h->mv_cache[list][scan8[n]][1] + src_y_offset * 8;
     const int luma_xy = (mx & 3) + ((my & 3) << 2);
-    int offset        = ((mx >> 2) << pixel_shift) + (my >> 2) * h->mb_linesize;
+    ptrdiff_t offset  = ((mx >> 2) << pixel_shift) + (my >> 2) * h->mb_linesize;
     uint8_t *src_y    = pic->f.data[0] + offset;
     uint8_t *src_cb, *src_cr;
     int extra_width  = 0;
@@ -1547,6 +1547,8 @@ av_cold int ff_h264_decode_init(AVCodecContext *avctx)
     avctx->chroma_sample_location = AVCHROMA_LOC_LEFT;
 
     ff_h264_decode_init_vlc();
+
+    ff_init_cabac_states();
 
     h->pixel_shift        = 0;
     h->sps.bit_depth_luma = avctx->bits_per_raw_sample = 8;
@@ -2552,7 +2554,7 @@ void ff_h264_hl_decode_mb(H264Context *h)
         hl_decode_mb_simple_8(h);
 }
 
-static int pred_weight_table(H264Context *h)
+int ff_pred_weight_table(H264Context *h)
 {
     int list, i;
     int luma_def, chroma_def;
@@ -3196,6 +3198,50 @@ static int h264_slice_header_init(H264Context *h, int reinit)
     return 0;
 }
 
+int ff_set_ref_count(H264Context *h)
+{
+    int num_ref_idx_active_override_flag, max_refs;
+
+    // set defaults, might be overridden a few lines later
+    h->ref_count[0] = h->pps.ref_count[0];
+    h->ref_count[1] = h->pps.ref_count[1];
+
+    if (h->slice_type_nos != AV_PICTURE_TYPE_I) {
+        if (h->slice_type_nos == AV_PICTURE_TYPE_B)
+            h->direct_spatial_mv_pred = get_bits1(&h->gb);
+        num_ref_idx_active_override_flag = get_bits1(&h->gb);
+
+        if (num_ref_idx_active_override_flag) {
+            h->ref_count[0] = get_ue_golomb(&h->gb) + 1;
+            if (h->ref_count[0] < 1)
+                return AVERROR_INVALIDDATA;
+            if (h->slice_type_nos == AV_PICTURE_TYPE_B) {
+                h->ref_count[1] = get_ue_golomb(&h->gb) + 1;
+                if (h->ref_count[1] < 1)
+                    return AVERROR_INVALIDDATA;
+            }
+        }
+
+        if (h->slice_type_nos == AV_PICTURE_TYPE_B)
+            h->list_count = 2;
+        else
+            h->list_count = 1;
+    } else {
+        h->list_count   = 0;
+        h->ref_count[0] = h->ref_count[1] = 0;
+    }
+
+    max_refs = h->picture_structure == PICT_FRAME ? 16 : 32;
+
+    if (h->ref_count[0] > max_refs || h->ref_count[1] > max_refs) {
+        av_log(h->avctx, AV_LOG_ERROR, "reference overflow\n");
+        h->ref_count[0] = h->ref_count[1] = 0;
+        return AVERROR_INVALIDDATA;
+    }
+
+    return 0;
+}
+
 /**
  * Decode a slice header.
  * This will also call ff_MPV_common_init() and frame_start() as needed.
@@ -3210,7 +3256,7 @@ static int decode_slice_header(H264Context *h, H264Context *h0)
 {
     unsigned int first_mb_in_slice;
     unsigned int pps_id;
-    int num_ref_idx_active_override_flag, max_refs, ret;
+    int ret;
     unsigned int slice_type, tmp, i, j;
     int default_ref_list_done = 0;
     int last_pic_structure, last_pic_droppable;
@@ -3617,42 +3663,9 @@ static int decode_slice_header(H264Context *h, H264Context *h0)
     if (h->pps.redundant_pic_cnt_present)
         h->redundant_pic_count = get_ue_golomb(&h->gb);
 
-    // set defaults, might be overridden a few lines later
-    h->ref_count[0] = h->pps.ref_count[0];
-    h->ref_count[1] = h->pps.ref_count[1];
-
-    if (h->slice_type_nos != AV_PICTURE_TYPE_I) {
-        if (h->slice_type_nos == AV_PICTURE_TYPE_B)
-            h->direct_spatial_mv_pred = get_bits1(&h->gb);
-        num_ref_idx_active_override_flag = get_bits1(&h->gb);
-
-        if (num_ref_idx_active_override_flag) {
-            h->ref_count[0] = get_ue_golomb(&h->gb) + 1;
-            if (h->ref_count[0] < 1)
-                return AVERROR_INVALIDDATA;
-            if (h->slice_type_nos == AV_PICTURE_TYPE_B) {
-                h->ref_count[1] = get_ue_golomb(&h->gb) + 1;
-                if (h->ref_count[1] < 1)
-                    return AVERROR_INVALIDDATA;
-            }
-        }
-
-        if (h->slice_type_nos == AV_PICTURE_TYPE_B)
-            h->list_count = 2;
-        else
-            h->list_count = 1;
-    } else {
-        h->list_count   = 0;
-        h->ref_count[0] = h->ref_count[1] = 0;
-    }
-
-    max_refs = h->picture_structure == PICT_FRAME ? 16 : 32;
-
-    if (h->ref_count[0] > max_refs || h->ref_count[1] > max_refs) {
-        av_log(h->avctx, AV_LOG_ERROR, "reference overflow\n");
-        h->ref_count[0] = h->ref_count[1] = 0;
-        return AVERROR_INVALIDDATA;
-    }
+    ret = ff_set_ref_count(h);
+    if (ret < 0)
+        return ret;
 
     if (!default_ref_list_done)
         ff_h264_fill_default_ref_list(h);
@@ -3668,7 +3681,7 @@ static int decode_slice_header(H264Context *h, H264Context *h0)
     if ((h->pps.weighted_pred && h->slice_type_nos == AV_PICTURE_TYPE_P) ||
         (h->pps.weighted_bipred_idc == 1 &&
          h->slice_type_nos == AV_PICTURE_TYPE_B))
-        pred_weight_table(h);
+        ff_pred_weight_table(h);
     else if (h->pps.weighted_bipred_idc == 2 &&
              h->slice_type_nos == AV_PICTURE_TYPE_B) {
         implicit_weight_table(h, -1);
@@ -4244,7 +4257,6 @@ static int decode_slice(struct AVCodecContext *avctx, void *arg)
         align_get_bits(&h->gb);
 
         /* init cabac */
-        ff_init_cabac_states();
         ff_init_cabac_decoder(&h->cabac,
                               h->gb.buffer + get_bits_count(&h->gb) / 8,
                               (get_bits_left(&h->gb) + 7) / 8);
@@ -4878,6 +4890,7 @@ static const AVProfile profiles[] = {
 
 AVCodec ff_h264_decoder = {
     .name                  = "h264",
+    .long_name             = NULL_IF_CONFIG_SMALL("H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10"),
     .type                  = AVMEDIA_TYPE_VIDEO,
     .id                    = AV_CODEC_ID_H264,
     .priv_data_size        = sizeof(H264Context),
@@ -4888,7 +4901,6 @@ AVCodec ff_h264_decoder = {
                              CODEC_CAP_DELAY | CODEC_CAP_SLICE_THREADS |
                              CODEC_CAP_FRAME_THREADS,
     .flush                 = flush_dpb,
-    .long_name             = NULL_IF_CONFIG_SMALL("H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10"),
     .init_thread_copy      = ONLY_IF_THREADS_ENABLED(decode_init_thread_copy),
     .update_thread_context = ONLY_IF_THREADS_ENABLED(decode_update_thread_context),
     .profiles              = NULL_IF_CONFIG_SMALL(profiles),

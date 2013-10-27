@@ -273,7 +273,8 @@ static void output_buffer(int16_t **samples, int nchan, int blocksize,
     }
 }
 
-static const int fixed_coeffs[3][3] = {
+static const int fixed_coeffs[][3] = {
+    { 0,  0,  0 },
     { 1,  0,  0 },
     { 2, -1,  0 },
     { 3, -3,  1 }
@@ -302,7 +303,12 @@ static int decode_subframe_lpc(ShortenContext *s, int command, int channel,
     } else {
         /* fixed LPC coeffs */
         pred_order = command;
-        coeffs     = fixed_coeffs[pred_order - 1];
+        if (pred_order >= FF_ARRAY_ELEMS(fixed_coeffs)) {
+            av_log(s->avctx, AV_LOG_ERROR, "invalid pred_order %d\n",
+                   pred_order);
+            return AVERROR_INVALIDDATA;
+        }
+        coeffs     = fixed_coeffs[pred_order];
         qshift     = 0;
     }
 
@@ -650,6 +656,7 @@ static av_cold int shorten_decode_close(AVCodecContext *avctx)
 
 AVCodec ff_shorten_decoder = {
     .name           = "shorten",
+    .long_name      = NULL_IF_CONFIG_SMALL("Shorten"),
     .type           = AVMEDIA_TYPE_AUDIO,
     .id             = AV_CODEC_ID_SHORTEN,
     .priv_data_size = sizeof(ShortenContext),
@@ -657,7 +664,6 @@ AVCodec ff_shorten_decoder = {
     .close          = shorten_decode_close,
     .decode         = shorten_decode_frame,
     .capabilities   = CODEC_CAP_DELAY | CODEC_CAP_DR1,
-    .long_name      = NULL_IF_CONFIG_SMALL("Shorten"),
     .sample_fmts    = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_S16P,
                                                       AV_SAMPLE_FMT_NONE },
 };

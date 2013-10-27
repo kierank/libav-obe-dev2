@@ -490,7 +490,8 @@ static int avi_read_header(AVFormatContext *s)
                     avi->dv_demux = avpriv_dv_init_demux(s);
                     if (!avi->dv_demux)
                         goto fail;
-                }
+                } else
+                    goto fail;
                 s->streams[0]->priv_data = ast;
                 avio_skip(pb, 3 * 4);
                 ast->scale = avio_rl32(pb);
@@ -657,9 +658,10 @@ static int avi_read_header(AVFormatContext *s)
                         st->codec->extradata_size += 9;
                         if ((ret = av_reallocp(&st->codec->extradata,
                                                st->codec->extradata_size +
-                                               FF_INPUT_BUFFER_PADDING_SIZE)) < 0)
+                                               FF_INPUT_BUFFER_PADDING_SIZE)) < 0) {
+                            st->codec->extradata_size = 0;
                             return ret;
-                        else
+                        } else
                             memcpy(st->codec->extradata + st->codec->extradata_size - 9,
                                    "BottomUp", 9);
                     }
@@ -815,7 +817,8 @@ fail:
 
 static int read_gab2_sub(AVStream *st, AVPacket *pkt)
 {
-    if (!strcmp(pkt->data, "GAB2") && AV_RL16(pkt->data + 5) == 2) {
+    if (pkt->size >= 7 &&
+        !strcmp(pkt->data, "GAB2") && AV_RL16(pkt->data + 5) == 2) {
         uint8_t desc[256];
         int score      = AVPROBE_SCORE_EXTENSION, ret;
         AVIStream *ast = st->priv_data;
@@ -949,7 +952,7 @@ start_sync:
             goto start_sync;
         }
 
-        n = get_stream_idx(d);
+        n = avi->dv_demux ? 0 : get_stream_idx(d);
 
         if (!((i - avi->last_pkt_pos) & 1) &&
             get_stream_idx(d + 1) < s->nb_streams)
@@ -1058,6 +1061,8 @@ static int avi_read_packet(AVFormatContext *s, AVPacket *pkt)
         int size = avpriv_dv_get_packet(avi->dv_demux, pkt);
         if (size >= 0)
             return size;
+        else
+            goto resync;
     }
 
     if (avi->non_interleaved) {
@@ -1389,12 +1394,17 @@ static int avi_read_seek(AVFormatContext *s, int stream_index,
     int64_t pos;
     AVIStream *ast;
 
+    /* Does not matter which stream is requested dv in avi has the
+     * stream information in the first video stream.
+     */
+    if (avi->dv_demux)
+        stream_index = 0;
+
     if (!avi->index_loaded) {
         /* we only load the index on demand */
         avi_load_index(s);
         avi->index_loaded = 1;
     }
-    assert(stream_index >= 0);
 
     st    = s->streams[stream_index];
     ast   = st->priv_data;
@@ -1415,7 +1425,6 @@ static int avi_read_seek(AVFormatContext *s, int stream_index,
         /* One and only one real stream for DV in AVI, and it has video  */
         /* offsets. Calling with other stream indexes should have failed */
         /* the av_index_search_timestamp call above.                     */
-        assert(stream_index == 0);
 
         /* Feed the DV video stream version of the timestamp to the */
         /* DV demux so it can synthesize correct timestamps.        */

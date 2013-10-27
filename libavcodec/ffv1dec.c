@@ -669,6 +669,7 @@ static int read_header(FFV1Context *f)
             return AVERROR(ENOSYS);
         }
         switch (f->avctx->bits_per_raw_sample) {
+        case 0:
         case 8:
             f->avctx->pix_fmt = AV_PIX_FMT_RGB32;
             break;
@@ -908,6 +909,7 @@ static int ffv1_decode_frame(AVCodecContext *avctx, void *data,
 
 AVCodec ff_ffv1_decoder = {
     .name           = "ffv1",
+    .long_name      = NULL_IF_CONFIG_SMALL("FFmpeg video codec #1"),
     .type           = AVMEDIA_TYPE_VIDEO,
     .id             = AV_CODEC_ID_FFV1,
     .priv_data_size = sizeof(FFV1Context),
@@ -916,5 +918,4 @@ AVCodec ff_ffv1_decoder = {
     .decode         = ffv1_decode_frame,
     .capabilities   = CODEC_CAP_DR1 /*| CODEC_CAP_DRAW_HORIZ_BAND*/ |
                       CODEC_CAP_SLICE_THREADS,
-    .long_name      = NULL_IF_CONFIG_SMALL("FFmpeg video codec #1"),
 };
